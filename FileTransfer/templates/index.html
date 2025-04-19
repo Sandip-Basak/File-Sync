@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>📁 FileSync Dashboard</title>
+
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    body {
+      background-color: #f8f9fa;
+      padding: 40px 0;
+    }
+    .container {
+      background-color: #fff;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.05);
+    }
+    .media-thumb {
+      width: 100%;
+      max-height: 200px;
+      object-fit: cover;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .card {
+      margin-bottom: 20px;
+    }
+    .drop-zone {
+      border: 2px dashed #007bff;
+      border-radius: 10px;
+      padding: 30px;
+      text-align: center;
+      color: #6c757d;
+      transition: all 0.3s ease-in-out;
+    }
+    .drop-zone.dragover {
+      background-color: #e9f7fe;
+      border-color: #0056b3;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2 class="mb-4 text-center">📡 FileSync Server Dashboard</h2>
+
+    <!-- Drag & Drop Zone -->
+    <div class="drop-zone mb-3" id="dropZone">
+      <p>📥 Drag & Drop files here or use the uploader below</p>
+    </div>
+
+    <!-- Upload Form -->
+    <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data" class="row g-3 mb-4">
+      <div class="col-md-10">
+        <input type="file" name="files" id="fileInput" multiple class="form-control" required />
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-primary w-100">Upload</button>
+      </div>
+    </form>
+
+    <!-- Search & Sort -->
+    <div class="row mb-3">
+      <div class="col-md-8">
+        <input type="text" id="searchInput" class="form-control" placeholder="🔍 Search by filename..." />
+      </div>
+      <div class="col-md-4">
+        <select id="sortSelect" class="form-select">
+          <option value="az">Sort: Name (A-Z)</option>
+          <option value="za">Sort: Name (Z-A)</option>
+          <option value="sizeAsc">Sort: Size (Smallest)</option>
+          <option value="sizeDesc">Sort: Size (Largest)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Media Gallery -->
+    <div class="row" id="fileGallery">
+      <p class="text-muted">Loading files...</p>
+    </div>
+  </div>
+
+  <!-- Fullscreen Modal -->
+  <div class="modal fade" id="previewModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+      <div class="modal-content bg-dark">
+        <div class="modal-body text-center p-2">
+          <div id="modalContent"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    const fileGallery = document.getElementById("fileGallery");
+    const modalContent = document.getElementById("modalContent");
+    const previewModal = new bootstrap.Modal(document.getElementById("previewModal"));
+    const dropZone = document.getElementById("dropZone");
+    const fileInput = document.getElementById("fileInput");
+    const searchInput = document.getElementById("searchInput");
+    const sortSelect = document.getElementById("sortSelect");
+
+    let allFiles = [];
+
+    const getFileType = (filename) => {
+      const ext = filename.split('.').pop().toLowerCase();
+      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return 'image';
+      if (['mp4', 'mov', 'webm'].includes(ext)) return 'video';
+      if (['mp3', 'wav', 'ogg'].includes(ext)) return 'audio';
+      return 'document';
+    };
+
+    const openPreview = (type, url) => {
+      modalContent.innerHTML = {
+        image: `<img src="${url}" class="w-100 rounded" />`,
+        video: `<video src="${url}" controls autoplay class="w-100 rounded"></video>`
+      }[type] || "";
+      previewModal.show();
+    };
+
+    const deleteFile = async (filename) => {
+      try {
+        const res = await fetch(`/delete/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.status === 'success') {
+          loadFiles();
+        } else {
+          alert('Failed to delete file');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Error deleting file.');
+      }
+    };
+
+    const renderFiles = (files) => {
+      fileGallery.innerHTML = "";
+      if (files.length === 0) {
+        fileGallery.innerHTML = '<p class="text-muted">No files found.</p>';
+        return;
+      }
+
+      files.forEach(file => {
+        const type = getFileType(file.name);
+        const fileUrl = `/download/${encodeURIComponent(file.name)}`;
+        const col = document.createElement("div");
+        col.className = "col-md-4";
+
+        let preview = "";
+        if (type === 'image') {
+          preview = `<img src="${fileUrl}" class="media-thumb" onclick="openPreview('image', '${fileUrl}')"/>`;
+        } else if (type === 'video') {
+          preview = `<video src="${fileUrl}" class="media-thumb" onclick="openPreview('video', '${fileUrl}')" muted></video>`;
+        } else if (type === 'audio') {
+          preview = `<audio controls src="${fileUrl}" class="w-100"></audio>`;
+        } else {
+          preview = `<div class="p-3 bg-light rounded"><a href="${fileUrl}" target="_blank">${file.name}</a></div>`;
+        }
+
+        col.innerHTML = `
+          <div class="card shadow-sm">
+            ${preview}
+            <div class="card-body text-center">
+              <p class="card-text mb-1">${file.name}</p>
+              <p class="text-muted">${Math.round(file.size / 1024)} KB</p>
+              <button class="btn btn-sm btn-outline-danger" onclick="deleteFile('${file.name}')">Delete</button>
+            </div>
+          </div>
+        `;
+        fileGallery.appendChild(col);
+      });
+    };
+
+    const applyFilters = () => {
+      let filtered = allFiles.filter(file => file.name.toLowerCase().includes(searchInput.value.toLowerCase()));
+      const sortVal = sortSelect.value;
+
+      filtered.sort((a, b) => {
+        if (sortVal === "az") return a.name.localeCompare(b.name);
+        if (sortVal === "za") return b.name.localeCompare(a.name);
+        if (sortVal === "sizeAsc") return a.size - b.size;
+        if (sortVal === "sizeDesc") return b.size - a.size;
+        return 0;
+      });
+
+      renderFiles(filtered);
+    };
+
+    const loadFiles = () => {
+      fetch("/files")
+        .then(res => res.json())
+        .then(files => {
+          allFiles = files;
+          applyFilters();
+        })
+        .catch(() => {
+          fileGallery.innerHTML = '<p class="text-danger">Failed to load files.</p>';
+        });
+    };
+
+    // Search & Sort Events
+    searchInput.addEventListener('input', applyFilters);
+    sortSelect.addEventListener('change', applyFilters);
+
+    // Drag & Drop Upload
+    dropZone.addEventListener("dragover", e => {
+      e.preventDefault();
+      dropZone.classList.add("dragover");
+    });
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+    dropZone.addEventListener("drop", e => {
+      e.preventDefault();
+      dropZone.classList.remove("dragover");
+
+      const files = e.dataTransfer.files;
+      const data = new FormData();
+      for (const file of files) data.append("files", file);
+
+      fetch("/upload", { method: "POST", body: data })
+        .then(() => loadFiles())
+        .catch(err => alert("Upload failed."));
+    });
+
+    // Standard Upload
+    document.getElementById("uploadForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+      const data = new FormData(this);
+
+      fetch("/upload", { method: "POST", body: data })
+        .then(() => {
+          this.reset();
+          loadFiles();
+        })
+        .catch(err => alert("Upload failed."));
+    });
+
+    loadFiles();
+  </script>
+</body>
+</html>
